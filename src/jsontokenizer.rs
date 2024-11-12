@@ -58,17 +58,12 @@ impl<'a> JsonTokenizer<'a> {
     }
 
     #[inline]
-    fn skip_string_escape(&mut self) -> TokenizerInternalResult<()> {
+    fn skip_unicodeescape(&mut self) -> TokenizerInternalResult<()> {
         match self.read_or_null() {
-            b'\0' => Err(TokenizerErrorType::UnexpectedEndOfInput),
-            b'b' | b'f' | b'n' | b'r' | b't' | b'"' | b'\\' | b'/' => Ok(()),
-            b'u' => match self.read_or_null() {
+            b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => match self.read_or_null() {
                 b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => match self.read_or_null() {
                     b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => match self.read_or_null() {
-                        b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => match self.read_or_null() {
-                            b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => Ok(()),
-                            _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
-                        },
+                        b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => Ok(()),
                         _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
                     },
                     _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
@@ -80,52 +75,59 @@ impl<'a> JsonTokenizer<'a> {
     }
 
     #[inline]
+    fn skip_stringescape(&mut self) -> TokenizerInternalResult<()> {
+        match self.read_or_null() {
+            b'\0' => Err(TokenizerErrorType::UnexpectedEndOfInput),
+            b'b' | b'f' | b'n' | b'r' | b't' | b'"' | b'\\' | b'/' => Ok(()),
+            b'u' => self.skip_unicodeescape(),
+            _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
+        }
+    }
+
+    // intentionally not inlined as its the minority case
     fn parse_string_escaped(&mut self) -> TokenizerInternalResult<JsonTokenType> {
-        'stringloop: loop {
+        self.skip_stringescape()?;
+
+        loop {
             match self.read_or_null() {
                 b'\0' => {
-                    return Err(TokenizerErrorType::UnexpectedEndOfInput);
+                    break Err(TokenizerErrorType::UnexpectedEndOfInput);
                 }
                 b'"' => {
-                    break 'stringloop;
+                    break Ok(JsonTokenType::EscString);
                 }
                 b'\\' => {
-                    self.skip_string_escape()?;
-                    continue 'stringloop;
+                    self.skip_stringescape()?;
+                    continue;
                 }
                 _ => {}
             }
         }
-
-        Ok(JsonTokenType::EscString)
     }
 
     #[inline]
     fn parse_string(&mut self) -> TokenizerInternalResult<JsonTokenType> {
-        'stringloop: loop {
+        loop {
             match self.read_or_null() {
                 b'\0' => {
-                    return Err(TokenizerErrorType::UnexpectedEndOfInput);
+                    break Err(TokenizerErrorType::UnexpectedEndOfInput);
                 }
                 b'"' => {
-                    break 'stringloop;
+                    break Ok(JsonTokenType::String);
                 }
                 b'\\' => {
-                    self.skip_string_escape()?;
-                    return self.parse_string_escaped();
+                    break self.parse_string_escaped();
                 }
                 _ => {}
             }
         }
-
-        Ok(JsonTokenType::String)
     }
 
     #[inline]
     fn parse_number_neg(&mut self) -> TokenizerInternalResult<JsonTokenType> {
-        match self.peek_or_null() {
+        match self.read_or_null() {
             b'\0' => Err(TokenizerErrorType::UnexpectedEndOfInput),
-            b'0' => self.eat(); self.parse_number_zero(),
+            b'0' => self.parse_number_zero(),
             b'1'..=b'9' => self.parse_number_one(),
             _ => Err(TokenizerErrorType::UnexpectedCharInNumericLiteral),
         }
@@ -135,8 +137,8 @@ impl<'a> JsonTokenizer<'a> {
     fn parse_number_zero(&mut self) -> TokenizerInternalResult<JsonTokenType> {
         match self.read_or_null() {
             b'\0' => Ok(JsonTokenType::Integer),
-            b'.' => self.parse_number_dot(start_pos),
-            b'e' | b'E' => self.parse_number_e(start_pos),
+            b'.' => self.parse_number_dot(),
+            b'e' | b'E' => self.parse_number_e(),
             _ => {
                 self.pos -= 1;
                 Ok(JsonTokenType::Integer)
@@ -145,142 +147,121 @@ impl<'a> JsonTokenizer<'a> {
     }
 
     #[inline]
-    fn parse_number_one(&mut self, start_pos: usize) -> TokenizerResult<JsonToken> {
+    fn parse_number_one(&mut self) -> TokenizerInternalResult<JsonTokenType> {
         loop {
             match self.read_or_null() {
                 b'\0' => {
-                    return Ok(JsonToken {
-                        token_type: JsonTokenType::Integer,
-                        value: &self.input[start_pos..self.pos],
-                    });
+                    break Ok(JsonTokenType::Integer);
                 }
                 b'0'..=b'9' => continue,
-                b'.' => return self.parse_number_dot(start_pos),
-                b'e' | b'E' => return self.parse_number_e(start_pos),
+                b'.' => break self.parse_number_dot(),
+                b'e' | b'E' => break self.parse_number_e(),
                 _ => {
                     self.pos -= 1;
-                    return Ok(JsonToken {
-                        token_type: JsonTokenType::Integer,
-                        value: &self.input[start_pos..self.pos],
-                    });
-                }
-            }
-        }
-    }
-
-    fn parse_number_dot(&mut self, start_pos: usize) -> TokenizerResult<JsonToken> {
-        match self.read_or_null() {
-            b'\0' => return Err(TokenizerError::UnexpectedEndOfInput),
-            b'0'..=b'9' => {}
-            _ => return Err(TokenizerError::UnexpectedCharInNumericLiteral(start_pos)),
-        }
-
-        loop {
-            match self.read_or_null() {
-                b'\0' => {
-                    return Ok(JsonToken {
-                        token_type: JsonTokenType::Number,
-                        value: &self.input[start_pos..self.pos],
-                    });
-                }
-                b'0'..=b'9' => continue,
-                b'e' | b'E' => return self.parse_number_e(start_pos),
-                _ => {
-                    self.pos -= 1;
-                    return Ok(JsonToken {
-                        token_type: JsonTokenType::Number,
-                        value: &self.input[start_pos..self.pos],
-                    });
-                }
-            }
-        }
-    }
-
-    fn parse_number_e(&mut self, start_pos: usize) -> TokenizerResult<JsonToken> {
-        match self.read_or_null() {
-            b'\0' => return Err(TokenizerError::UnexpectedEndOfInput),
-            b'0'..=b'9' => {}
-            b'+' | b'-' => match self.read_or_null() {
-                b'\0' => return Err(TokenizerError::UnexpectedEndOfInput),
-                b'0'..=b'9' => {}
-                _ => return Err(TokenizerError::UnexpectedCharInExponentLiteral(start_pos)),
-            },
-            _ => {
-                return Err(TokenizerError::UnexpectedCharInExponentLiteral(start_pos));
-            }
-        }
-
-        loop {
-            match self.read_or_null() {
-                b'\0' => {
-                    return Ok(JsonToken {
-                        token_type: JsonTokenType::Number,
-                        value: &self.input[start_pos..self.pos],
-                    });
-                }
-                b'0'..=b'9' => continue,
-                _ => {
-                    self.pos -= 1;
-                    return Ok(JsonToken {
-                        token_type: JsonTokenType::Number,
-                        value: &self.input[start_pos..self.pos],
-                    });
+                    break Ok(JsonTokenType::Integer);
                 }
             }
         }
     }
 
     #[inline]
-    fn parse_true(&mut self, start_pos: usize) -> TokenizerResult<JsonToken> {
+    fn parse_number_dot(&mut self) -> TokenizerInternalResult<JsonTokenType> {
+        match self.read_or_null() {
+            b'\0' => Err(TokenizerErrorType::UnexpectedEndOfInput),
+            b'0'..=b'9' => self.parse_number_dot0(),
+            _ => Err(TokenizerErrorType::UnexpectedCharInNumericLiteral),
+        }
+    }
+
+    #[inline]
+    fn parse_number_dot0(&mut self) -> TokenizerInternalResult<JsonTokenType> {
+        loop {
+            match self.read_or_null() {
+                b'\0' => {
+                    break Ok(JsonTokenType::Number);
+                }
+                b'0'..=b'9' => continue,
+                b'e' | b'E' => break self.parse_number_e(),
+                _ => {
+                    self.pos -= 1;
+                    break Ok(JsonTokenType::Number);
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn parse_number_e(&mut self) -> TokenizerInternalResult<JsonTokenType> {
+        match self.read_or_null() {
+            b'\0' => Err(TokenizerErrorType::UnexpectedEndOfInput),
+            b'0'..=b'9' => self.parse_number_e0(),
+            b'+' | b'-' => match self.read_or_null() {
+                b'\0' => Err(TokenizerErrorType::UnexpectedEndOfInput),
+                b'0'..=b'9' => self.parse_number_e0(),
+                _ => Err(TokenizerErrorType::UnexpectedCharInExponentLiteral),
+            },
+            _ => Err(TokenizerErrorType::UnexpectedCharInExponentLiteral),
+        }
+    }
+
+    #[inline]
+    fn parse_number_e0(&mut self) -> TokenizerInternalResult<JsonTokenType> {
+        loop {
+            match self.read_or_null() {
+                b'\0' => {
+                    break Ok(JsonTokenType::Number);
+                }
+                b'0'..=b'9' => continue,
+                _ => {
+                    self.pos -= 1;
+                    break Ok(JsonTokenType::Number);
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn parse_true(&mut self) -> TokenizerInternalResult<JsonTokenType> {
         match self.read_or_null() {
             b'r' | b'R' => match self.read_or_null() {
                 b'u' | b'U' => match self.read_or_null() {
-                    b'e' | b'E' => Ok(JsonToken {
-                        token_type: JsonTokenType::True,
-                        value: &self.input[start_pos..self.pos],
-                    }),
-                    _ => Err(TokenizerError::UnexpectedCharInTrueLiteral(start_pos)),
+                    b'e' | b'E' => Ok(JsonTokenType::True),
+                    _ => Err(TokenizerErrorType::UnexpectedCharInTrueLiteral),
                 },
-                _ => Err(TokenizerError::UnexpectedCharInTrueLiteral(start_pos)),
+                _ => Err(TokenizerErrorType::UnexpectedCharInTrueLiteral),
             },
-            _ => Err(TokenizerError::UnexpectedCharInTrueLiteral(start_pos)),
+            _ => Err(TokenizerErrorType::UnexpectedCharInTrueLiteral),
         }
     }
 
     #[inline]
-    fn parse_false(&mut self, start_pos: usize) -> TokenizerResult<JsonToken> {
+    fn parse_false(&mut self) -> TokenizerInternalResult<JsonTokenType> {
         match self.read_or_null() {
             b'a' | b'A' => match self.read_or_null() {
                 b'l' | b'L' => match self.read_or_null() {
                     b's' | b'S' => match self.read_or_null() {
-                        b'e' | b'E' => Ok(JsonToken {
-                            token_type: JsonTokenType::False,
-                            value: &self.input[start_pos..self.pos],
-                        }),
-                        _ => Err(TokenizerError::UnexpectedCharInFalseLiteral(start_pos)),
+                        b'e' | b'E' => Ok(JsonTokenType::False),
+                        _ => Err(TokenizerErrorType::UnexpectedCharInFalseLiteral),
                     },
-                    _ => Err(TokenizerError::UnexpectedCharInFalseLiteral(start_pos)),
+                    _ => Err(TokenizerErrorType::UnexpectedCharInFalseLiteral),
                 },
-                _ => Err(TokenizerError::UnexpectedCharInFalseLiteral(start_pos)),
+                _ => Err(TokenizerErrorType::UnexpectedCharInFalseLiteral),
             },
-            _ => Err(TokenizerError::UnexpectedCharInFalseLiteral(start_pos)),
+            _ => Err(TokenizerErrorType::UnexpectedCharInFalseLiteral),
         }
     }
 
     #[inline]
-    fn parse_null(&mut self, start_pos: usize) -> TokenizerResult<JsonToken> {
+    fn parse_null(&mut self) -> TokenizerInternalResult<JsonTokenType> {
         match self.read_or_null() {
             b'u' | b'U' => match self.read_or_null() {
                 b'l' | b'L' => match self.read_or_null() {
-                    b'l' | b'L' => Ok(JsonToken {
-                        token_type: JsonTokenType::Null,
-                        value: &self.input[start_pos..self.pos],
-                    }),
-                    _ => Err(TokenizerError::UnexpectedCharInNullLiteral(start_pos)),
+                    b'l' | b'L' => Ok(JsonTokenType::Null),
+                    _ => Err(TokenizerErrorType::UnexpectedCharInNullLiteral),
                 },
-                _ => Err(TokenizerError::UnexpectedCharInNullLiteral(start_pos)),
+                _ => Err(TokenizerErrorType::UnexpectedCharInNullLiteral),
             },
-            _ => Err(TokenizerError::UnexpectedCharInNullLiteral(start_pos)),
+            _ => Err(TokenizerErrorType::UnexpectedCharInNullLiteral),
         }
     }
 
@@ -299,48 +280,24 @@ impl<'a> JsonTokenizer<'a> {
     }
 
     #[inline]
-    fn parse_value(&mut self) -> TokenizerResult<JsonToken> {
-        let start_pos = self.pos;
-
-
+    fn parse_value(&mut self) -> TokenizerInternalResult<JsonTokenType> {
         match self.read_or_null() {
-            b'\0' => Ok(JsonToken {
-                token_type: JsonTokenType::End,
-                value: &self.input[start_pos..self.pos],
-            }),
-            b'{' => Ok(JsonToken {
-                token_type: JsonTokenType::ObjectStart,
-                value: &self.input[start_pos..self.pos],
-            }),
-            b'}' => Ok(JsonToken {
-                token_type: JsonTokenType::ObjectEnd,
-                value: &self.input[start_pos..self.pos],
-            }),
-            b':' => Ok(JsonToken {
-                token_type: JsonTokenType::ObjectKeyDelim,
-                value: &self.input[start_pos..self.pos],
-            }),
-            b'[' => Ok(JsonToken {
-                token_type: JsonTokenType::ArrayStart,
-                value: &self.input[start_pos..self.pos],
-            }),
-            b']' => Ok(JsonToken {
-                token_type: JsonTokenType::ArrayEnd,
-                value: &self.input[start_pos..self.pos],
-            }),
-            b',' => Ok(JsonToken {
-                token_type: JsonTokenType::ListDelim,
-                value: &self.input[start_pos..self.pos],
-            }),
-            b'"' => self.parse_string(start_pos),
-            b'-' => self.parse_number_neg(start_pos),
-            b'0' => self.parse_number_zero(start_pos),
-            b'1'..=b'9' => self.parse_number_one(start_pos),
-            b't' | b'T' => self.parse_true(start_pos),
-            b'f' | b'F' => self.parse_false(start_pos),
-            b'n' | b'N' => self.parse_null(start_pos),
+            b'\0' => Ok(JsonTokenType::End),
+            b'{' => Ok(JsonTokenType::ObjectStart),
+            b'}' => Ok(JsonTokenType::ObjectEnd),
+            b':' => Ok(JsonTokenType::ObjectKeyDelim),
+            b'[' => Ok(JsonTokenType::ArrayStart),
+            b']' => Ok(JsonTokenType::ArrayEnd),
+            b',' => Ok(JsonTokenType::ListDelim),
+            b'"' => self.parse_string(),
+            b'-' => self.parse_number_neg(),
+            b'0' => self.parse_number_zero(),
+            b'1'..=b'9' => self.parse_number_one(),
+            b't' | b'T' => self.parse_true(),
+            b'f' | b'F' => self.parse_false(),
+            b'n' | b'N' => self.parse_null(),
 
-            _ => Err(TokenizerError::UnexpectedBeginChar(start_pos)),
+            _ => Err(TokenizerErrorType::UnexpectedBeginChar),
         }
     }
 
@@ -348,7 +305,15 @@ impl<'a> JsonTokenizer<'a> {
     pub fn step(&mut self) -> TokenizerResult<JsonToken> {
         self.skip_whitespace()?;
         let start_pos = self.pos;
-        let res = self.parse_value()?;
-
+        match self.parse_value() {
+            Ok(token_type) => {
+                let value = &self.input[start_pos..self.pos];
+                Ok(JsonToken { token_type, value })
+            }
+            Err(e) => Err(TokenizerError {
+                error_type: e,
+                pos: self.pos,
+            }),
+        }
     }
 }
