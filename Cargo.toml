@@ -1,0 +1,12 @@
+[package]
+name = "jsonsm-rs"
+version = "0.0.1"
+authors = [ "Brett Lawson <brett19@gmail.com>" ]
+edition = "2021"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "jsontokenizer"
+harness = false
