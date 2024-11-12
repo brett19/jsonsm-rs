@@ -32,25 +32,23 @@ impl<'a> JsonTokenizer<'a> {
 
     #[inline]
     pub(crate) fn skip_string(&mut self) -> TokenizerSkipResult {
-        let mut pos = self.pos;
-        while pos < self.input.len() {
-            match self.input[pos] {
+        loop {
+            match self.read_or_null() {
+                b'\0' => {
+                    break Err(TokenizerErrorType::UnexpectedEndOfInput);
+                }
                 b'"' => {
-                    self.pos = pos + 1;
-                    return Ok(());
+                    break Ok(());
                 }
-                b'\\' => {
-                    if pos + 1 >= self.input.len() {
-                        return Err(TokenizerErrorType::UnexpectedEndOfInput);
+                b'\\' => match self.read_or_null() {
+                    b'\0' => {
+                        break Err(TokenizerErrorType::UnexpectedEndOfInput);
                     }
-
-                    pos += 1;
-                }
+                    _ => {}
+                },
                 _ => {}
             }
         }
-
-        return Err(TokenizerErrorType::UnexpectedEndOfInput);
     }
 
     #[inline]
@@ -93,13 +91,13 @@ impl<'a> JsonTokenizer<'a> {
     #[inline]
     pub(crate) fn skip_whitespace(&mut self) -> TokenizerSkipResult {
         loop {
-            let c = self.read_or_null();
+            let c = self.peek_or_null();
             match c {
-                b' ' | b'\t' | b'\n' | b'\r' => {}
-                _ => {
-                    self.rewind();
-                    break Ok(());
+                b' ' | b'\t' | b'\n' | b'\r' => {
+                    self.eat();
+                    continue;
                 }
+                _ => break Ok(()),
             }
         }
     }
