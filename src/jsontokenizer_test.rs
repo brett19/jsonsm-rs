@@ -18,6 +18,11 @@ mod tests {
         let mut t = JsonTokenizer::new(input.as_bytes());
         assert_step(&mut t, expected_type, input);
         assert_step(&mut t, JsonTokenType::End, "");
+
+        t = JsonTokenizer::new(input.as_bytes());
+        t.skip_value().unwrap();
+        let end_token = t.step().unwrap();
+        assert_eq!(end_token.token_type, JsonTokenType::End);
     }
 
     #[test]

@@ -5,7 +5,10 @@ authors = [ "Brett Lawson <brett19@gmail.com>" ]
 edition = "2021"
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = "0.5.1"
+
+[profile.bench]
+debug = true
 
 [[bench]]
 name = "jsontokenizer"

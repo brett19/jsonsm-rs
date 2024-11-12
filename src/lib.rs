@@ -1,5 +1,7 @@
 pub mod expression;
 pub mod jsontokenizer;
+mod jsontokenizer_parse;
+mod jsontokenizer_skip;
 mod jsontokenizer_test;
 pub mod jsontokenizer_token;
 pub mod logictree;
