@@ -4,51 +4,27 @@ type TokenizerSkipResult = std::result::Result<(), TokenizerErrorType>;
 
 impl<'a> JsonTokenizer<'a> {
     #[inline]
-    pub(crate) fn skip_unicodeescape(&mut self) -> TokenizerSkipResult {
-        match self.read_or_null() {
-            b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => match self.read_or_null() {
-                b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => match self.read_or_null() {
-                    b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => match self.read_or_null() {
-                        b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => Ok(()),
-                        _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
-                    },
-                    _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
-                },
-                _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
-            },
-            _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
-        }
-    }
-
-    #[inline]
-    pub(crate) fn skip_stringescape(&mut self) -> TokenizerSkipResult {
-        match self.read_or_null() {
-            b'\0' => Err(TokenizerErrorType::UnexpectedEndOfInput),
-            b'b' | b'f' | b'n' | b'r' | b't' | b'"' | b'\\' | b'/' => Ok(()),
-            b'u' => self.skip_unicodeescape(),
-            _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
-        }
-    }
-
-    #[inline]
     pub(crate) fn skip_string(&mut self) -> TokenizerSkipResult {
-        loop {
-            match self.read_or_null() {
-                b'\0' => {
-                    break Err(TokenizerErrorType::UnexpectedEndOfInput);
-                }
+        let mut is_escaped = false;
+        for pos in self.pos..self.input.len() {
+            match self.input[pos] {
                 b'"' => {
-                    break Ok(());
-                }
-                b'\\' => match self.read_or_null() {
-                    b'\0' => {
-                        break Err(TokenizerErrorType::UnexpectedEndOfInput);
+                    if !is_escaped {
+                        self.pos = pos + 1;
+                        return Ok(());
                     }
-                    _ => {}
-                },
-                _ => {}
+                    is_escaped = false;
+                }
+                b'\\' => {
+                    is_escaped = true;
+                }
+                _ => {
+                    is_escaped = false;
+                }
             }
         }
+
+        return Err(TokenizerErrorType::UnexpectedEndOfInput);
     }
 
     #[inline]

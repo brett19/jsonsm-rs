@@ -3,12 +3,40 @@ use crate::{
     jsontokenizer_token::JsonTokenType,
 };
 
+type TokenizerSkipResult = std::result::Result<(), TokenizerErrorType>;
 type TokenizerParseResult = std::result::Result<JsonTokenType, TokenizerErrorType>;
 
 impl<'a> JsonTokenizer<'a> {
+    #[inline]
+    pub(crate) fn parse_unicodeescape(&mut self) -> TokenizerSkipResult {
+        match self.read_or_null() {
+            b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => match self.read_or_null() {
+                b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => match self.read_or_null() {
+                    b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => match self.read_or_null() {
+                        b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => Ok(()),
+                        _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
+                    },
+                    _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
+                },
+                _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
+            },
+            _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn parse_stringescape(&mut self) -> TokenizerSkipResult {
+        match self.read_or_null() {
+            b'\0' => Err(TokenizerErrorType::UnexpectedEndOfInput),
+            b'b' | b'f' | b'n' | b'r' | b't' | b'"' | b'\\' | b'/' => Ok(()),
+            b'u' => self.parse_unicodeescape(),
+            _ => Err(TokenizerErrorType::UnexpectedEscapeCode),
+        }
+    }
+
     // intentionally not inlined as its the minority case
     fn parse_string_escaped(&mut self) -> TokenizerParseResult {
-        self.skip_stringescape()?;
+        self.parse_stringescape()?;
 
         loop {
             match self.read_or_null() {
@@ -19,7 +47,7 @@ impl<'a> JsonTokenizer<'a> {
                     break Ok(JsonTokenType::EscString);
                 }
                 b'\\' => {
-                    self.skip_stringescape()?;
+                    self.parse_stringescape()?;
                     continue;
                 }
                 _ => {}
