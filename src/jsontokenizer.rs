@@ -31,15 +31,6 @@ impl<'a> JsonTokenizer<'a> {
     }
 
     #[inline]
-    pub(crate) fn peek_or_null(&mut self) -> u8 {
-        if self.pos >= self.input.len() {
-            return 0;
-        }
-
-        self.input[self.pos]
-    }
-
-    #[inline]
     pub(crate) fn read_or_null(&mut self) -> u8 {
         if self.pos >= self.input.len() {
             return 0;
@@ -48,11 +39,6 @@ impl<'a> JsonTokenizer<'a> {
         let c = self.input[self.pos];
         self.pos += 1;
         c
-    }
-
-    #[inline]
-    pub(crate) fn eat(&mut self) {
-        self.pos += 1;
     }
 
     #[inline]

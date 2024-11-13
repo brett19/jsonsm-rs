@@ -91,13 +91,18 @@ impl<'a> JsonTokenizer<'a> {
     #[inline]
     pub(crate) fn skip_whitespace(&mut self) -> TokenizerSkipResult {
         loop {
-            let c = self.peek_or_null();
+            let c = self.read_or_null();
             match c {
+                b'\0' => {
+                    break Ok(());
+                }
                 b' ' | b'\t' | b'\n' | b'\r' => {
-                    self.eat();
                     continue;
                 }
-                _ => break Ok(()),
+                _ => {
+                    self.rewind();
+                    break Ok(());
+                }
             }
         }
     }
