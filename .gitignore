@@ -1,2 +1,3 @@
 /target/
 *:Zone.Identifier
+/flamegraph.svg
