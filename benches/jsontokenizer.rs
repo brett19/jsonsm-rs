@@ -32,19 +32,21 @@ fn skipthrough(json_bytes: &[u8]) {
     t.skip_value().unwrap();
 }
 
-fn criterion_benchmark(c: &mut Criterion) {
-    let testdata = fs::read_to_string("testdata/people.json")
-        .expect("Should have been able to read test file");
+fn criterion_testdata(c: &mut Criterion, name: &str, path: &str) {
+    let testdata = fs::read_to_string(path).expect("Should have been able to read test file");
     let json_bytes = testdata.as_bytes();
 
-    let mut group = c.benchmark_group("tokenize-throughput");
+    let mut group = c.benchmark_group(name);
     group.throughput(criterion::Throughput::Bytes(json_bytes.len() as u64));
     group.bench_function("hash", |b| b.iter(|| hash(black_box(json_bytes))));
     group.bench_function("tokenize", |b| b.iter(|| tokenize(black_box(json_bytes))));
-    group.bench_function("skipthrough", |b| {
-        b.iter(|| skipthrough(black_box(json_bytes)))
-    });
+    group.bench_function("skip", |b| b.iter(|| skipthrough(black_box(json_bytes))));
     group.finish();
+}
+
+fn criterion_benchmark(c: &mut Criterion) {
+    criterion_testdata(c, "people", "testdata/people.json");
+    criterion_testdata(c, "bigvector", "testdata/bigvector.json");
 }
 
 criterion_group!(benches, criterion_benchmark);

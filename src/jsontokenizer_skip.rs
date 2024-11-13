@@ -28,10 +28,10 @@ fn skip_string(data: &[u8], pos: usize) -> TokenizerFnResult {
 fn skip_number(data: &[u8], pos: usize) -> TokenizerFnResult {
     for pos in pos + 1..data.len() {
         match data[pos] {
-            b'0'..=b'9' => continue,
-            b'.' => continue,
-            b'e' | b'E' => continue,
-            b'+' | b'-' => continue,
+            b'0'..=b'9' => {}
+            b'.' => {}
+            b'e' | b'E' => {}
+            b'+' | b'-' => {}
             _ => {
                 return Ok(pos);
             }
@@ -90,28 +90,28 @@ fn skip_false(data: &[u8], pos: usize) -> TokenizerFnResult {
     match v[1] {
         b'a' | b'A' => {}
         _ => {
-            return Err((TokenizerErrorType::UnexpectedCharInTrueLiteral, pos + 1));
+            return Err((TokenizerErrorType::UnexpectedCharInFalseLiteral, pos + 1));
         }
     }
 
     match v[2] {
         b'l' | b'L' => {}
         _ => {
-            return Err((TokenizerErrorType::UnexpectedCharInTrueLiteral, pos + 2));
+            return Err((TokenizerErrorType::UnexpectedCharInFalseLiteral, pos + 2));
         }
     }
 
     match v[3] {
         b's' | b'S' => {}
         _ => {
-            return Err((TokenizerErrorType::UnexpectedCharInTrueLiteral, pos + 3));
+            return Err((TokenizerErrorType::UnexpectedCharInFalseLiteral, pos + 3));
         }
     }
 
     match v[4] {
         b'e' | b'E' => {}
         _ => {
-            return Err((TokenizerErrorType::UnexpectedCharInTrueLiteral, pos + 4));
+            return Err((TokenizerErrorType::UnexpectedCharInFalseLiteral, pos + 4));
         }
     }
 
@@ -132,21 +132,21 @@ fn skip_null(data: &[u8], pos: usize) -> TokenizerFnResult {
     match v[1] {
         b'u' | b'U' => {}
         _ => {
-            return Err((TokenizerErrorType::UnexpectedCharInTrueLiteral, pos + 1));
+            return Err((TokenizerErrorType::UnexpectedCharInNullLiteral, pos + 1));
         }
     }
 
     match v[2] {
         b'l' | b'L' => {}
         _ => {
-            return Err((TokenizerErrorType::UnexpectedCharInTrueLiteral, pos + 2));
+            return Err((TokenizerErrorType::UnexpectedCharInNullLiteral, pos + 2));
         }
     }
 
     match v[3] {
         b'l' | b'L' => {}
         _ => {
-            return Err((TokenizerErrorType::UnexpectedCharInTrueLiteral, pos + 3));
+            return Err((TokenizerErrorType::UnexpectedCharInNullLiteral, pos + 3));
         }
     }
 
@@ -154,38 +154,29 @@ fn skip_null(data: &[u8], pos: usize) -> TokenizerFnResult {
 }
 
 #[inline]
-fn skip_whitespace(data: &[u8], pos: usize) -> TokenizerFnResult {
-    for pos in pos..data.len() {
-        match data[pos] {
-            b' ' | b'\t' | b'\n' | b'\r' => continue,
-            _ => {
-                return Ok(pos);
-            }
-        }
-    }
-
-    Ok(data.len())
-}
-
-#[inline]
-fn skip_object_or_array(data: &[u8], pos: usize, initial_depth: u32) -> TokenizerFnResult {
-    let mut depth = initial_depth;
+fn skip_out_of_object_or_array(data: &[u8], pos: usize) -> TokenizerFnResult {
+    let mut depth = 1;
     let mut pos = pos;
     while pos < data.len() {
         match data[pos] {
             b' ' | b'\t' | b'\n' | b'\r' => {
                 pos += 1;
-                continue;
             }
-            b':' | b',' => pos += 1,
-            b'{' | b'[' => {
+            b':' | b',' => {
                 pos += 1;
+            }
+            b'{' | b'[' => {
                 depth += 1;
+                pos += 1;
             }
             b'}' | b']' => {
-                pos += 1;
                 depth -= 1;
+                if depth == 0 {
+                    return Ok(pos + 1);
+                }
+                pos += 1;
             }
+
             b'"' => pos = skip_string(data, pos)?,
             b'-' | b'0'..=b'9' => pos = skip_number(data, pos)?,
             b't' | b'T' => pos = skip_true(data, pos)?,
@@ -193,21 +184,43 @@ fn skip_object_or_array(data: &[u8], pos: usize, initial_depth: u32) -> Tokenize
             b'n' | b'N' => pos = skip_null(data, pos)?,
             _ => return Err((TokenizerErrorType::UnexpectedBeginChar, pos)),
         }
-
-        if depth == 0 {
-            return Ok(pos);
-        }
     }
 
     Err((TokenizerErrorType::UnexpectedEndOfInput, data.len()))
+}
+
+#[inline]
+fn skip_over_value(data: &[u8], pos: usize) -> TokenizerFnResult {
+    let mut pos = pos;
+    while pos < data.len() {
+        match data[pos] {
+            b' ' | b'\t' | b'\n' | b'\r' => {}
+            _ => break,
+        }
+        pos += 1;
+    }
+
+    if pos >= data.len() {
+        return Err((TokenizerErrorType::UnexpectedEndOfInput, data.len()));
+    }
+
+    match data[pos] {
+        b'{' | b'[' => return skip_out_of_object_or_array(data, pos + 1),
+        b'"' => return skip_string(data, pos),
+        b'-' | b'0'..=b'9' => return skip_number(data, pos),
+        b't' | b'T' => return skip_true(data, pos),
+        b'f' | b'F' => return skip_false(data, pos),
+        b'n' | b'N' => return skip_null(data, pos),
+        _ => return Err((TokenizerErrorType::UnexpectedBeginChar, pos)),
+    }
 }
 
 type TokenizerSkipResult = std::result::Result<(), TokenizerErrorType>;
 
 impl<'a> JsonTokenizer<'a> {
     #[inline]
-    pub(crate) fn skip_string(&mut self) -> TokenizerSkipResult {
-        match skip_string(self.input, self.pos - 1) {
+    pub(crate) fn skip_out_of_object_or_array(&mut self) -> TokenizerSkipResult {
+        match skip_out_of_object_or_array(self.input, self.pos) {
             Ok(new_pos) => {
                 self.pos = new_pos;
                 Ok(())
@@ -220,92 +233,8 @@ impl<'a> JsonTokenizer<'a> {
     }
 
     #[inline]
-    pub(crate) fn skip_number(&mut self) -> TokenizerSkipResult {
-        match skip_number(self.input, self.pos - 1) {
-            Ok(new_pos) => {
-                self.pos = new_pos;
-                Ok(())
-            }
-            Err((e, new_pos)) => {
-                self.pos = new_pos;
-                Err(e)
-            }
-        }
-    }
-
-    #[inline]
-    pub(crate) fn skip_true(&mut self) -> TokenizerSkipResult {
-        match skip_true(self.input, self.pos - 1) {
-            Ok(new_pos) => {
-                self.pos = new_pos;
-                Ok(())
-            }
-            Err((e, new_pos)) => {
-                self.pos = new_pos;
-                Err(e)
-            }
-        }
-    }
-
-    #[inline]
-    pub(crate) fn skip_false(&mut self) -> TokenizerSkipResult {
-        match skip_false(self.input, self.pos - 1) {
-            Ok(new_pos) => {
-                self.pos = new_pos;
-                Ok(())
-            }
-            Err((e, new_pos)) => {
-                self.pos = new_pos;
-                Err(e)
-            }
-        }
-    }
-
-    #[inline]
-    pub(crate) fn skip_null(&mut self) -> TokenizerSkipResult {
-        match skip_null(self.input, self.pos - 1) {
-            Ok(new_pos) => {
-                self.pos = new_pos;
-                Ok(())
-            }
-            Err((e, new_pos)) => {
-                self.pos = new_pos;
-                Err(e)
-            }
-        }
-    }
-
-    #[inline]
-    pub(crate) fn skip_object_or_array(&mut self) -> TokenizerSkipResult {
-        match skip_object_or_array(self.input, self.pos, 1) {
-            Ok(new_pos) => {
-                self.pos = new_pos;
-                Ok(())
-            }
-            Err((e, new_pos)) => {
-                self.pos = new_pos;
-                Err(e)
-            }
-        }
-    }
-
-    #[inline]
-    pub(crate) fn skip_whitespace(&mut self) -> TokenizerSkipResult {
-        match skip_whitespace(self.input, self.pos) {
-            Ok(new_pos) => {
-                self.pos = new_pos;
-                Ok(())
-            }
-            Err((e, new_pos)) => {
-                self.pos = new_pos;
-                Err(e)
-            }
-        }
-    }
-
-    #[inline]
-    pub(crate) fn skip_any_value(&mut self) -> TokenizerSkipResult {
-        match skip_object_or_array(self.input, self.pos, 0) {
+    pub(crate) fn skip_over_value(&mut self) -> TokenizerSkipResult {
+        match skip_over_value(self.input, self.pos) {
             Ok(new_pos) => {
                 self.pos = new_pos;
                 Ok(())

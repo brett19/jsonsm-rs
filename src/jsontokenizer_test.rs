@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use std::str::from_utf8;
+    use std::{fs, str::from_utf8};
 
     use crate::{jsontokenizer::JsonTokenizer, jsontokenizer_token::JsonTokenType};
 
@@ -137,5 +137,35 @@ mod tests {
         assert_step(&mut t, JsonTokenType::String, "\"hello world\"");
         assert_step(&mut t, JsonTokenType::End, "");
         assert_step(&mut t, JsonTokenType::End, "");
+    }
+
+    fn jsontokenizer_testdata(path: &str) {
+        let testdata = fs::read_to_string(path).unwrap();
+        let json_bytes = testdata.as_bytes();
+
+        let mut t = JsonTokenizer::new(json_bytes);
+        loop {
+            let token = t.step().unwrap();
+            if token.token_type == JsonTokenType::End {
+                break;
+            }
+        }
+
+        t = JsonTokenizer::new(json_bytes);
+        t.skip_value().unwrap();
+        let token = t.step().unwrap();
+        if token.token_type != JsonTokenType::End {
+            panic!("skip over did not lead to end of document");
+        }
+    }
+
+    #[test]
+    fn jsontokenizer_testdata_people() {
+        jsontokenizer_testdata("testdata/people.json");
+    }
+
+    #[test]
+    fn jsontokenizer_testdata_bigvector() {
+        jsontokenizer_testdata("testdata/bigvector.json");
     }
 }

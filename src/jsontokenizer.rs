@@ -73,17 +73,7 @@ impl<'a> JsonTokenizer<'a> {
 
     #[inline]
     pub fn skip_value(&mut self) -> TokenizerResult<()> {
-        match self.parse_whitespace() {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(TokenizerError {
-                    error_type: e,
-                    pos: self.pos,
-                })
-            }
-        }
-
-        match self.skip_any_value() {
+        match self.skip_over_value() {
             Ok(_) => Ok(()),
             Err(e) => Err(TokenizerError {
                 error_type: e,
@@ -94,7 +84,7 @@ impl<'a> JsonTokenizer<'a> {
 
     #[inline]
     pub fn leave_value(&mut self) -> TokenizerResult<()> {
-        match self.skip_object_or_array() {
+        match self.skip_out_of_object_or_array() {
             Ok(_) => Ok(()),
             Err(e) => Err(TokenizerError {
                 error_type: e,
