@@ -202,6 +202,20 @@ impl<'a> JsonTokenizer<'a> {
     }
 
     #[inline]
+    pub(crate) fn parse_whitespace(&mut self) -> TokenizerSkipResult {
+        while self.pos < self.input.len() {
+            match self.input[self.pos] {
+                b' ' | b'\t' | b'\n' | b'\r' => {}
+                _ => break,
+            }
+
+            self.pos += 1;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
     pub(crate) fn parse_null(&mut self) -> TokenizerParseResult {
         match self.read_or_null() {
             b'u' | b'U' => match self.read_or_null() {

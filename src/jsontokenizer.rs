@@ -48,7 +48,7 @@ impl<'a> JsonTokenizer<'a> {
 
     #[inline]
     pub fn step(&mut self) -> TokenizerResult<JsonToken> {
-        match self.skip_whitespace() {
+        match self.parse_whitespace() {
             Ok(_) => {}
             Err(e) => {
                 return Err(TokenizerError {
@@ -73,7 +73,7 @@ impl<'a> JsonTokenizer<'a> {
 
     #[inline]
     pub fn skip_value(&mut self) -> TokenizerResult<()> {
-        match self.skip_whitespace() {
+        match self.parse_whitespace() {
             Ok(_) => {}
             Err(e) => {
                 return Err(TokenizerError {
