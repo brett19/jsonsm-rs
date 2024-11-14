@@ -1,9 +1,13 @@
+#![feature(portable_simd)]
+
+pub mod bytesiterator;
 pub mod expression;
 pub mod jsontokenizer;
 mod jsontokenizer_parse;
 mod jsontokenizer_skip;
 mod jsontokenizer_test;
 pub mod jsontokenizer_token;
+pub mod jsontokenizerx;
 pub mod logictree;
 pub mod logictree_node;
 pub mod logictree_state;

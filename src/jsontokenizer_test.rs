@@ -2,7 +2,10 @@
 mod tests {
     use std::{fs, str::from_utf8};
 
-    use crate::{jsontokenizer::JsonTokenizer, jsontokenizer_token::JsonTokenType};
+    use crate::{
+        jsontokenizer::JsonTokenizer, jsontokenizer_token::JsonTokenType,
+        jsontokenizerx::JsonTokenizerX,
+    };
 
     fn assert_step(
         tokenizer: &mut JsonTokenizer,
@@ -19,10 +22,10 @@ mod tests {
         assert_step(&mut t, expected_type, input);
         assert_step(&mut t, JsonTokenType::End, "");
 
-        t = JsonTokenizer::new(input.as_bytes());
-        t.skip_value().unwrap();
-        let end_token = t.step().unwrap();
-        assert_eq!(end_token.token_type, JsonTokenType::End);
+        let mut s = JsonTokenizerX::new(input.as_bytes());
+        s.skip_over_value().unwrap();
+        let end_token = s.step().unwrap();
+        assert_eq!(end_token, JsonTokenType::End);
     }
 
     #[test]

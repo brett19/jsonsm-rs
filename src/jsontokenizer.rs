@@ -36,7 +36,7 @@ impl<'a> JsonTokenizer<'a> {
             return 0;
         }
 
-        let c = self.input[self.pos];
+        let c = unsafe { *self.input.get_unchecked(self.pos) };
         self.pos += 1;
         c
     }
