@@ -12,3 +12,5 @@ pub mod logictree;
 pub mod logictree_node;
 pub mod logictree_state;
 pub mod logictree_validate;
+pub mod simdsearch;
+pub mod simdsearch_ops;

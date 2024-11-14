@@ -1,3 +1,5 @@
+use crate::{simdsearch::search_bytes_simd_u8x16, simdsearch_ops::SimdSearch};
+
 #[derive(Clone)]
 pub struct BytesIterator<'a> {
     input: &'a [u8],
@@ -55,17 +57,26 @@ impl<'a> BytesIterator<'a> {
         Err(())
     }
 
-    #[no_mangle]
-    pub fn skip_until_bracket(&mut self) -> std::result::Result<(), ()> {
+    #[inline]
+    pub fn skip_fast_until_and_get<C: SimdSearch<S>, S>(
+        &mut self,
+        state: &mut S,
+        check: &mut C,
+    ) -> std::result::Result<u8, ()> {
         if self.pos >= self.input.len() {
             return Err(());
         }
 
-        let bytes = unsafe { self.input.get_unchecked(self.pos..) };
-        let mut i = bytes.iter();
-        while i.next() != Some(&b']') {}
-
-        Ok(())
+        match search_bytes_simd_u8x16(&self.input[self.pos..], state, check) {
+            Some(i) => {
+                self.pos += i + 1;
+                Ok(unsafe { *self.input.get_unchecked(self.pos - 1) })
+            }
+            None => {
+                self.pos = self.input.len();
+                Err(())
+            }
+        }
     }
 
     #[inline]

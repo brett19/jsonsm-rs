@@ -1,6 +1,8 @@
 use crate::{
-    bytesiterator::BytesIterator, jsontokenizer::TokenizerErrorType,
+    bytesiterator::BytesIterator,
+    jsontokenizer::TokenizerErrorType,
     jsontokenizer_token::JsonTokenType,
+    simdsearch_ops::{SimdSearch, SimdSearchEq, SimdSearchExec, SimdSearchNot},
 };
 
 type TokenizerFnResult = std::result::Result<(), TokenizerErrorType>;
@@ -44,35 +46,17 @@ impl<'a> JsonTokenizerX<'a> {
 
     #[inline]
     fn skip_string(&mut self) -> TokenizerFnResult {
-        match self.iter.skip_until_and_get(|c| match c {
-            b'"' | b'\\' => true,
-            _ => false,
-        }) {
-            Ok(c) => match c {
-                b'\\' => {}
-                _ => return Ok(()),
-            },
-            Err(_) => return Err(TokenizerErrorType::UnexpectedEndOfInput),
-        }
-
-        let mut is_escaped = true;
-        match self.iter.skip_until_and_get(|c| {
-            if is_escaped {
-                is_escaped = false;
-                false
-            } else {
-                match c {
-                    b'"' => true,
-                    b'\\' => {
-                        is_escaped = true;
-                        false
-                    }
-                    _ => false,
-                }
+        loop {
+            match self
+                .iter
+                .skip_fast_until_and_get(&mut (), &mut SimdSearchEq::new(b'"').or_eq(b'\\'))
+            {
+                Ok(c) => match c {
+                    b'\\' => self.iter.skip(1),
+                    _ => return Ok(()),
+                },
+                Err(_) => return Err(TokenizerErrorType::UnexpectedEndOfInput),
             }
-        }) {
-            Ok(_) => Ok(()),
-            Err(_) => Err(TokenizerErrorType::UnexpectedEndOfInput),
         }
     }
 
@@ -92,41 +76,54 @@ impl<'a> JsonTokenizerX<'a> {
 
     #[inline]
     fn skip_out_of_object_or_array(&mut self) -> TokenizerFnResult {
-        let mut depth = 1;
+        struct DepthState {
+            depth: u32,
+        }
+        let mut state = DepthState { depth: 1 };
 
-        loop {
-            let c = match self.iter.skip_until_and_get(|c| match c {
-                b'{' | b'[' => true,
-                b'}' | b']' => true,
-                b'"' => true,
-                _ => false,
-            }) {
-                Ok(c) => c,
-                Err(_) => return Err(TokenizerErrorType::UnexpectedEndOfInput),
-            };
-
-            match c {
-                b'{' | b'[' => {
-                    depth += 1;
-                }
-                b'}' | b']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Ok(());
-                    }
-                }
-                b'"' => match self.skip_string() {
-                    Ok(_) => {}
-                    Err(e) => return Err(e),
+        match self.iter.skip_fast_until_and_get(
+            &mut state,
+            &mut SimdSearchExec::new(
+                SimdSearchEq::new(b'{').or_eq(b'['),
+                |s: &mut DepthState, v| {
+                    s.depth += if v { 1 } else { 0 };
+                    false
                 },
-                _ => {}
-            }
+            )
+            .or(SimdSearchExec::new(
+                SimdSearchEq::new(b'}').or_eq(b']'),
+                |s: &mut DepthState, v| {
+                    s.depth -= if v { 1 } else { 0 };
+                    s.depth == 0
+                },
+            )),
+            // TODO(brett19): need to skip quotes and escape sequences
+        ) {
+            Ok(_) => return Ok(()),
+            Err(_) => return Err(TokenizerErrorType::UnexpectedEndOfInput),
+        };
+    }
+
+    #[inline]
+    fn skip_whitespace_and_get(&mut self) -> Result<u8, TokenizerErrorType> {
+        match self.iter.skip_fast_until_and_get(
+            &mut (),
+            &mut SimdSearchNot::new(
+                SimdSearchEq::new(b'\t')
+                    .or_eq(b'\n')
+                    .or_eq(b'\x0C')
+                    .or_eq(b'\r')
+                    .or_eq(b' '),
+            ),
+        ) {
+            Ok(c) => Ok(c),
+            Err(_) => return Err(TokenizerErrorType::UnexpectedEndOfInput),
         }
     }
 
     #[inline]
     pub fn skip_over_value(&mut self) -> TokenizerFnResult {
-        match self.iter.skip_until_and_get(|c| !c.is_ascii_whitespace()) {
+        match self.skip_whitespace_and_get() {
             Ok(c) => match c {
                 b'{' | b'[' => return self.skip_out_of_object_or_array(),
                 b'"' => return self.skip_string(),
@@ -142,7 +139,7 @@ impl<'a> JsonTokenizerX<'a> {
 
     #[inline]
     pub fn step(&mut self) -> TokenizerParseResult {
-        match self.iter.skip_until(|c| !c.is_ascii_whitespace()) {
+        match self.skip_whitespace_and_get() {
             Ok(_) => Ok(JsonTokenType::Null),
             Err(_) => Ok(JsonTokenType::End),
         }
