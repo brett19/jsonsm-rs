@@ -54,17 +54,17 @@ unsafe fn search_bytes_unaligned<PS: FnMut(&u8) -> bool>(
 }
 
 #[inline]
-unsafe fn search_bytes_simd_u8x16_aligned<P: FnMut(std::simd::u8x16) -> std::simd::mask8x16>(
+unsafe fn search_bytes_simd_u8x16_aligned<P: FnMut(std::simd::u8x64) -> std::simd::mask8x64>(
     start: *const u8,
     end: *const u8,
     mut chkfn: P,
 ) -> Option<*const u8> {
-    debug_assert!((start as *const std::simd::u8x1).is_aligned());
-    debug_assert!((end as *const std::simd::u8x1).is_aligned());
+    debug_assert!((start as *const std::simd::u8x64).is_aligned());
+    debug_assert!((end as *const std::simd::u8x64).is_aligned());
 
     let mut cur = start;
     while cur != end {
-        let x = std::simd::u8x16::load_select_ptr(
+        let x = std::simd::u8x64::load_select_ptr(
             cur,
             std::simd::Mask::splat(true),
             std::simd::Simd::splat(0),
@@ -76,7 +76,7 @@ unsafe fn search_bytes_simd_u8x16_aligned<P: FnMut(std::simd::u8x16) -> std::sim
             None => (),
         };
 
-        cur = cur.add(align_of::<std::simd::u8x16>());
+        cur = cur.add(align_of::<std::simd::u8x64>());
     }
     None
 }
@@ -84,14 +84,14 @@ unsafe fn search_bytes_simd_u8x16_aligned<P: FnMut(std::simd::u8x16) -> std::sim
 #[inline]
 unsafe fn search_bytes_simd_u8x16_ptr<
     PS: FnMut(&u8) -> bool,
-    PF: FnMut(std::simd::u8x16) -> std::simd::mask8x16,
+    PF: FnMut(std::simd::u8x64) -> std::simd::mask8x64,
 >(
     start: *const u8,
     end: *const u8,
     mut bytefn: PS,
     mut simdfn: PF,
 ) -> Option<*const u8> {
-    const ALIGN: usize = align_of::<std::simd::u8x16>();
+    const ALIGN: usize = align_of::<std::simd::u8x64>();
 
     let len = end.offset_from(start) as usize;
     if len < ALIGN {
@@ -128,7 +128,7 @@ unsafe fn search_bytes_simd_u8x16_ptr<
 #[inline]
 fn search_bytes_simd_u8x16<
     PS: FnMut(&u8) -> bool,
-    PF: FnMut(std::simd::u8x16) -> std::simd::mask8x16,
+    PF: FnMut(std::simd::u8x64) -> std::simd::mask8x64,
 >(
     data: &[u8],
     mut bytefn: PS,
@@ -141,6 +141,25 @@ fn search_bytes_simd_u8x16<
             None => None,
         }
     }
+}
+
+#[inline]
+fn search_bytes_3b(data: &[u8], needles: [u8; 3]) -> Option<usize> {
+    use std::ops::BitOr;
+    use std::simd::cmp::SimdPartialEq;
+    use std::simd::Simd;
+
+    search_bytes_simd_u8x16(
+        data,
+        |c| {
+            return *c == needles[0] || *c == needles[1] || *c == needles[2];
+        },
+        |x| {
+            SimdPartialEq::simd_eq(x, Simd::splat(needles[0]))
+                .bitor(SimdPartialEq::simd_eq(x, Simd::splat(needles[1])))
+                .bitor(SimdPartialEq::simd_eq(x, Simd::splat(needles[2])))
+        },
+    )
 }
 
 #[inline]
@@ -176,14 +195,14 @@ fn find_byte_fast_aligned_16_test(data: &[u8]) -> Option<usize> {
 }
 
 fn find_end(json_bytes: &[u8]) {
-    let x = match search_bytes_6b(json_bytes, [b'"', b']', b'}', b'[', b'{', b'e']) {
+    let x = match search_bytes_3b(json_bytes, [b'e', b']', b'}']) {
         Some(i) => i,
         None => 0,
     };
     assert_eq!(x, 15473);
 
     let x_and_on = unsafe { json_bytes.get_unchecked(x + 1..) };
-    let y = match search_bytes_6b(x_and_on, [b'"', b']', b'}', b'[', b'{', b'e']) {
+    let y = match search_bytes_3b(x_and_on, [b'e', b']', b'}']) {
         Some(i) => i,
         None => 0,
     };
