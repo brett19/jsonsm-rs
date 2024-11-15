@@ -1,5 +1,8 @@
 use crate::simdsearch_ops::SimdSearch;
 
+pub type SimdArr = std::simd::u8x16;
+pub type SimdMask = std::simd::mask8x16;
+
 #[inline]
 unsafe fn search_bytes_unaligned<C: SimdSearch<S>, S>(
     start: *const u8,
@@ -24,16 +27,13 @@ unsafe fn search_bytes_simd_u8x16_aligned<C: SimdSearch<S>, S>(
     state: &mut S,
     check: &mut C,
 ) -> Option<*const u8> {
-    debug_assert!((start as *const std::simd::u8x16).is_aligned());
-    debug_assert!((end as *const std::simd::u8x16).is_aligned());
+    debug_assert!((start as *const SimdArr).is_aligned());
+    debug_assert!((end as *const SimdArr).is_aligned());
 
     let mut cur = start;
     while cur != end {
-        let x = std::simd::u8x16::load_select_ptr(
-            cur,
-            std::simd::Mask::splat(true),
-            std::simd::Simd::splat(0),
-        );
+        let x =
+            SimdArr::load_select_ptr(cur, std::simd::Mask::splat(true), std::simd::Simd::splat(0));
 
         let orz = check.for_simd(state, &x);
         match std::simd::Mask::first_set(orz) {
@@ -41,7 +41,7 @@ unsafe fn search_bytes_simd_u8x16_aligned<C: SimdSearch<S>, S>(
             None => (),
         };
 
-        cur = cur.add(align_of::<std::simd::u8x16>());
+        cur = cur.add(align_of::<SimdArr>());
     }
     None
 }
@@ -53,7 +53,7 @@ unsafe fn search_bytes_simd_u8x16_ptr<C: SimdSearch<S>, S>(
     state: &mut S,
     check: &mut C,
 ) -> Option<*const u8> {
-    const ALIGN: usize = align_of::<std::simd::u8x16>();
+    const ALIGN: usize = align_of::<SimdArr>();
 
     let len = end.offset_from(start) as usize;
     if len < ALIGN {

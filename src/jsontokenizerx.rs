@@ -2,7 +2,7 @@ use crate::{
     bytesiterator::BytesIterator,
     jsontokenizer::TokenizerErrorType,
     jsontokenizer_token::JsonTokenType,
-    simdsearch_ops::{SimdSearch, SimdSearchEq, SimdSearchExec, SimdSearchNot},
+    simdsearch_ops::{SimdSearch, SimdSearchDualExec, SimdSearchEq, SimdSearchNot},
 };
 
 type TokenizerFnResult = std::result::Result<(), TokenizerErrorType>;
@@ -75,33 +75,47 @@ impl<'a> JsonTokenizerX<'a> {
     }
 
     #[inline]
-    fn skip_out_of_object_or_array(&mut self) -> TokenizerFnResult {
+    fn skip_out_of_object_or_array(
+        &mut self,
+        deep_byte: u8,
+        shallow_byte: u8,
+    ) -> TokenizerFnResult {
         struct DepthState {
             depth: u32,
         }
         let mut state = DepthState { depth: 1 };
 
-        match self.iter.skip_fast_until_and_get(
-            &mut state,
-            &mut SimdSearchExec::new(
-                SimdSearchEq::new(b'{').or_eq(b'['),
-                |s: &mut DepthState, v| {
-                    s.depth += if v { 1 } else { 0 };
-                    false
+        loop {
+            match self.iter.skip_fast_until_and_get(
+                &mut state,
+                &mut SimdSearchDualExec::new(
+                    SimdSearchEq::new(deep_byte),
+                    SimdSearchEq::new(shallow_byte),
+                    |s: &mut DepthState, dv, sv| {
+                        s.depth += if dv { 1 } else { 0 };
+                        s.depth -= if sv { 1 } else { 0 };
+                        s.depth == 0
+                    },
+                )
+                .or(SimdSearchEq::new(b'\\')),
+            ) {
+                Ok(c) => match c {
+                    // if we hit a \\, we need to skip the next byte since we could
+                    // be skipping over one of the depth control characters
+                    b'\\' => self.iter.skip(1),
+                    _ => return Ok(()),
                 },
-            )
-            .or(SimdSearchExec::new(
-                SimdSearchEq::new(b'}').or_eq(b']'),
-                |s: &mut DepthState, v| {
-                    s.depth -= if v { 1 } else { 0 };
-                    s.depth == 0
-                },
-            )),
-            // TODO(brett19): need to skip quotes and escape sequences
-        ) {
-            Ok(_) => return Ok(()),
-            Err(_) => return Err(TokenizerErrorType::UnexpectedEndOfInput),
-        };
+                Err(_) => return Err(TokenizerErrorType::UnexpectedEndOfInput),
+            };
+        }
+    }
+
+    pub fn skip_out_of_object(&mut self) -> TokenizerFnResult {
+        self.skip_out_of_object_or_array(b'{', b'}')
+    }
+
+    pub fn skip_out_of_array(&mut self) -> TokenizerFnResult {
+        self.skip_out_of_object_or_array(b'[', b']')
     }
 
     #[inline]
@@ -125,7 +139,8 @@ impl<'a> JsonTokenizerX<'a> {
     pub fn skip_over_value(&mut self) -> TokenizerFnResult {
         match self.skip_whitespace_and_get() {
             Ok(c) => match c {
-                b'{' | b'[' => return self.skip_out_of_object_or_array(),
+                b'{' => return self.skip_out_of_object(),
+                b'[' => return self.skip_out_of_array(),
                 b'"' => return self.skip_string(),
                 b'-' | b'0'..=b'9' => return self.skip_number(),
                 b't' | b'T' => return self.skip_true(),

@@ -65,21 +65,70 @@ fn find_end(json_bytes: &[u8]) {
 }
 
 fn criterion_testdata(c: &mut Criterion, name: &str, path: &str) {
-    let testdata = fs::read_to_string(path).expect("Should have been able to read test file");
-    let json_bytes = testdata.as_bytes();
+    let testdatastr = fs::read_to_string(path).unwrap();
+    let testdata = testdatastr.as_bytes();
 
     let mut group = c.benchmark_group(name);
-    group.throughput(criterion::Throughput::Bytes(json_bytes.len() as u64));
-    group.bench_function("hash", |b| b.iter(|| hash(black_box(json_bytes))));
-    group.bench_function("tokenize", |b| b.iter(|| tokenize(black_box(json_bytes))));
-    group.bench_function("skip", |b| b.iter(|| skipthrough(black_box(json_bytes))));
-    group.bench_function("findend", |b| b.iter(|| find_end(black_box(json_bytes))));
+    group.throughput(criterion::Throughput::Bytes(testdata.len() as u64));
+    group.bench_function("hash", |b| b.iter(|| hash(black_box(testdata))));
+    group.bench_function("tokenize", |b| b.iter(|| tokenize(black_box(testdata))));
+    group.bench_function("skip", |b| b.iter(|| skipthrough(black_box(testdata))));
+    group.bench_function("findend", |b| b.iter(|| find_end(black_box(testdata))));
     group.finish();
 }
 
+fn criterion_testdata_all(c: &mut Criterion) {
+    let mut testdatas: Vec<String> = Vec::new();
+    let mut testdataslen: usize = 0;
+    for (_, path) in TESTDATAPATHS.iter() {
+        let testdata = fs::read_to_string(path).unwrap();
+        testdataslen += testdata.as_bytes().len();
+        testdatas.push(testdata);
+    }
+
+    let mut group = c.benchmark_group("all");
+    group.throughput(criterion::Throughput::Bytes(testdataslen as u64));
+    group.bench_function("hash", |b| {
+        b.iter(|| {
+            for testdata in testdatas.iter() {
+                hash(black_box(testdata.as_bytes()));
+            }
+        })
+    });
+    group.bench_function("tokenize", |b| {
+        b.iter(|| {
+            for testdata in testdatas.iter() {
+                tokenize(black_box(testdata.as_bytes()));
+            }
+        })
+    });
+    group.bench_function("skip", |b| {
+        b.iter(|| {
+            for testdata in testdatas.iter() {
+                skipthrough(black_box(testdata.as_bytes()));
+            }
+        })
+    });
+    group.bench_function("findend", |b| {
+        b.iter(|| {
+            for testdata in testdatas.iter() {
+                find_end(black_box(testdata.as_bytes()));
+            }
+        })
+    });
+    group.finish();
+}
+
+const TESTDATAPATHS: [(&str, &str); 2] = [
+    ("people", "testdata/people.json"),
+    ("bigvector", "testdata/bigvector.json"),
+];
+
 fn criterion_benchmark(c: &mut Criterion) {
-    criterion_testdata(c, "people", "testdata/people.json");
-    criterion_testdata(c, "bigvector", "testdata/bigvector.json");
+    for (name, path) in TESTDATAPATHS.iter() {
+        criterion_testdata(c, name, path);
+    }
+    criterion_testdata_all(c);
 }
 
 criterion_group!(benches, criterion_benchmark);
