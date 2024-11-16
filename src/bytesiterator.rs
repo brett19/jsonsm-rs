@@ -91,7 +91,9 @@ impl<'a> BytesIterator<'a> {
     }
 
     #[inline]
-    pub fn read_multi<const SIZE: usize>(&mut self) -> std::result::Result<&[u8; SIZE], ()> {
+    pub fn read_multi<'b, const SIZE: usize>(
+        &'b mut self,
+    ) -> std::result::Result<&'a [u8; SIZE], ()> {
         if self.pos + SIZE > self.input.len() {
             self.pos = self.input.len();
             return Err(());

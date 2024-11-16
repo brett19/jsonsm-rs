@@ -14,6 +14,18 @@ pub struct LogicTreeState<'a> {
 }
 
 impl LogicTreeState<'_> {
+    pub fn new(tree: &LogicTree) -> LogicTreeState {
+        let mut state = Vec::with_capacity(tree.nodes.len());
+        for _ in 0..tree.nodes.len() {
+            state.push(LogicNodeState::Unset);
+        }
+
+        LogicTreeState {
+            tree: tree,
+            state: state,
+        }
+    }
+
     fn check_node(&mut self, node_idx: usize) {
         let node = &self.tree.nodes[node_idx];
         match node {

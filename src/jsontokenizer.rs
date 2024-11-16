@@ -47,7 +47,7 @@ impl<'a> JsonTokenizer<'a> {
     }
 
     #[inline]
-    pub fn step(&mut self) -> TokenizerResult<JsonToken> {
+    pub fn step<'b>(&'b mut self) -> TokenizerResult<JsonToken<'a>> {
         match self.parse_whitespace() {
             Ok(_) => {}
             Err(e) => {
