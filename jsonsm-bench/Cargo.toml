@@ -1,0 +1,22 @@
+[package]
+name = "jsonsm-bench"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+jsonsm.workspace = true
+jsonsm-ast.workspace = true
+jsonsm-slow = { path = "../jsonsm-slow" }
+serde_json.workspace = true
+
+# `cargo bench -p jsonsm-bench` runs the harness itself, not a criterion wrapper around it.
+# The workloads, the engine selection and the agreement checks live in the library, so this
+# target and the `jsonsm-bench` binary are the same measurement reached two ways.
+[[bench]]
+name = "throughput"
+harness = false

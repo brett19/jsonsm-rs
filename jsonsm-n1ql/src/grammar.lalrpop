@@ -1,0 +1,170 @@
+// N1QL-ish filter grammar for jsonsm, mirroring gojsonsm's filterExprParser. Produces a
+// jsonsm_ast::Expr. Tokens come from the logos lexer (see lexer.rs) via LALRPOP's extern
+// token interface. Precedence (low -> high): OR, AND, NOT, comparison, additive,
+// multiplicative, unary. Arithmetic lowers to math functions. Parentheses group boolean
+// sub-expressions only (operands are not parenthesised), matching the Go grammar.
+
+use jsonsm_ast::{Expr, Literal, CompareOp, Field, LoopType, PathComponent};
+use crate::{
+    as_condition, func, negate, num_literal, or_join, and_join, string_literal, strip_backticks,
+    append_key, append_index, ParseCtx,
+};
+use crate::lexer::{Token, LexError};
+
+grammar(ctx: &mut ParseCtx);
+
+extern {
+    type Location = usize;
+    type Error = LexError;
+    enum Token {
+        "AND" => Token::And,
+        "OR" => Token::Or,
+        "NOT" => Token::Not,
+        "IS" => Token::Is,
+        "NULL" => Token::Null,
+        "MISSING" => Token::Missing,
+        "TRUE" => Token::True,
+        "FALSE" => Token::False,
+        "EXISTS" => Token::Exists,
+        "REGEXP" => Token::Regexp,
+        "ANY" => Token::Any,
+        "EVERY" => Token::Every,
+        "IN" => Token::In,
+        "SATISFIES" => Token::Satisfies,
+        "END" => Token::End,
+        "&&" => Token::AmpAmp,
+        "||" => Token::PipePipe,
+        "!" => Token::Bang,
+        "=" => Token::Eq,
+        "==" => Token::EqEq,
+        "<>" => Token::Ne1,
+        "!=" => Token::Ne2,
+        "<" => Token::Lt,
+        "<=" => Token::Le,
+        ">" => Token::Gt,
+        ">=" => Token::Ge,
+        "+" => Token::Plus,
+        "-" => Token::Minus,
+        "*" => Token::Star,
+        "/" => Token::Slash,
+        "%" => Token::Percent,
+        "(" => Token::LParen,
+        ")" => Token::RParen,
+        "," => Token::Comma,
+        "." => Token::Dot,
+        "[" => Token::LBracket,
+        "]" => Token::RBracket,
+        "num" => Token::Num(<String>),
+        "dqstr" => Token::DqStr(<String>),
+        "sqstr" => Token::SqStr(<String>),
+        "bqident" => Token::BqIdent(<String>),
+        "ident" => Token::Ident(<String>),
+    }
+}
+
+pub Filter: Expr = <OrE>;
+
+OrE: Expr = {
+    <l:OrE> OrOp <r:AndE> => or_join(l, r),
+    AndE,
+};
+OrOp: () = { "OR" => (), "||" => () };
+
+AndE: Expr = {
+    <l:AndE> AndOp <r:NotE> => and_join(l, r),
+    NotE,
+};
+AndOp: () = { "AND" => (), "&&" => () };
+
+NotE: Expr = {
+    NotOp <e:NotE> => Expr::Not(Box::new(e)),
+    Term,
+};
+NotOp: () = { "NOT" => (), "!" => () };
+
+Term: Expr = {
+    "(" <OrE> ")",
+    Loop,
+    Cmp,
+};
+
+// ANY/EVERY/ANY AND EVERY <var> IN <array> SATISFIES <predicate> END.
+// The variable is bound by name; ctx.loop_expr allocates its id and records the name for
+// the post-parse resolution pass (see crate::resolve).
+Loop: Expr = {
+    "ANY" <v:"ident"> "IN" <arr:Add> "SATISFIES" <b:OrE> "END" =>
+        ctx.loop_expr(LoopType::Any, v, arr, b),
+    "EVERY" <v:"ident"> "IN" <arr:Add> "SATISFIES" <b:OrE> "END" =>
+        ctx.loop_expr(LoopType::Every, v, arr, b),
+    "ANY" "AND" "EVERY" <v:"ident"> "IN" <arr:Add> "SATISFIES" <b:OrE> "END" =>
+        ctx.loop_expr(LoopType::AnyEvery, v, arr, b),
+};
+
+Cmp: Expr = {
+    <l:Add> <op:CmpOp> <r:Add> => Expr::compare(op, l, r),
+    <l:Add> "IS" "NULL" => Expr::compare(CompareOp::Equals, l, Expr::Value(Literal::Null)),
+    <l:Add> "IS" "NOT" "NULL" => Expr::compare(CompareOp::NotEquals, l, Expr::Value(Literal::Null)),
+    <l:Add> "IS" "MISSING" => Expr::NotExists(Box::new(l)),
+    <l:Add> "IS" "NOT" "MISSING" => Expr::Exists(Box::new(l)),
+    <e:Add> => as_condition(e),
+};
+
+CmpOp: CompareOp = {
+    "=" => CompareOp::Equals,
+    "==" => CompareOp::Equals,
+    "<>" => CompareOp::NotEquals,
+    "!=" => CompareOp::NotEquals,
+    "<" => CompareOp::LessThan,
+    "<=" => CompareOp::LessEquals,
+    ">" => CompareOp::GreaterThan,
+    ">=" => CompareOp::GreaterEquals,
+};
+
+Add: Expr = {
+    <l:Add> "+" <r:Mul> => func("mathAdd", vec![l, r]),
+    <l:Add> "-" <r:Mul> => func("mathSubract", vec![l, r]),
+    Mul,
+};
+
+Mul: Expr = {
+    <l:Mul> "*" <r:Unary> => func("mathMultiply", vec![l, r]),
+    <l:Mul> "/" <r:Unary> => func("mathDivide", vec![l, r]),
+    <l:Mul> "%" <r:Unary> => func("mathModulo", vec![l, r]),
+    Unary,
+};
+
+Unary: Expr = {
+    "-" <e:Unary> => negate(e),
+    Primary,
+};
+
+Primary: Expr = {
+    <n:"num"> => num_literal(&n),
+    <s:"dqstr"> => Expr::Value(Literal::String(string_literal(&s))),
+    <s:"sqstr"> => Expr::Value(Literal::String(string_literal(&s))),
+    "TRUE" => Expr::Value(Literal::Bool(true)),
+    "FALSE" => Expr::Value(Literal::Bool(false)),
+    "NULL" => Expr::Value(Literal::Null),
+    "EXISTS" "(" <f:Add> ")" => Expr::Exists(Box::new(f)),
+    "REGEXP" "(" <l:Add> "," <p:Add> ")" => Expr::Matches { lhs: Box::new(l), pattern: Box::new(p) },
+    <id:"ident"> "(" <args:Comma<Add>> ")" => func(&id, args),
+    <p:FieldPath> => Expr::Field(Field { root: 0, path: p }),
+};
+
+FieldPath: Vec<PathComponent> = {
+    <s:Seg> => vec![s],
+    <p:FieldPath> "." <s:Seg> => append_key(p, s),
+    <p:FieldPath> "[" <n:"num"> "]" => append_index(p, &n),
+};
+
+Seg: PathComponent = {
+    <id:"ident"> => PathComponent::Key(id),
+    <bq:"bqident"> => PathComponent::Key(strip_backticks(&bq)),
+};
+
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => match e {
+        Some(e) => { v.push(e); v }
+        None => v,
+    }
+};

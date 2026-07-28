@@ -1,0 +1,15 @@
+[package]
+name = "jsonsm-json"
+description = "The JSON-array expression format for jsonsm."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+jsonsm-ast.workspace = true
+jsonsm.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,25 @@
+[package]
+name = "jsonsm"
+description = "High-speed single-pass streaming JSON expression matching (core engine)."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["simd"]
+# Explicit SIMD scan kernels (`std::arch` intrinsics, x86-64 AVX2) behind the `Scan`
+# strategy. Contains the crate's only `unsafe`; the scalar tokenizer stays the fallback
+# for other targets and for CPUs without the required features.
+simd = []
+
+[dependencies]
+jsonsm-ast.workspace = true
+thiserror.workspace = true
+memchr = "2"
+regex.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

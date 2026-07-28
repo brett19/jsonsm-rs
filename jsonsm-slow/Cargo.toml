@@ -1,0 +1,24 @@
+[package]
+name = "jsonsm-slow"
+description = "A simple reference matcher for jsonsm, used as a correctness oracle."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+# Forwards to `jsonsm/simd` so the differential sweep can name the backends it must cover.
+# Without this, `cfg(feature = "simd")` in this crate's tests silently evaluates false and
+# the multi-backend sweep degrades to a single backend.
+default = ["simd"]
+simd = ["jsonsm/simd"]
+
+[dependencies]
+jsonsm-ast.workspace = true
+# Not inherited from [workspace.dependencies]: this crate needs `default-features = false`
+# so that disabling its own `simd` feature genuinely disables jsonsm's.
+jsonsm = { path = "../jsonsm", version = "0.0.1", default-features = false }
+serde_json.workspace = true
+thiserror.workspace = true

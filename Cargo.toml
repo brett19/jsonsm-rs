@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "jsonsm-ast",
+    "jsonsm",
+    "jsonsm-json",
+    "jsonsm-n1ql",
+    "jsonsm-slow",
+    "jsonsm-bench",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+authors = ["Brett Lawson <brett19@gmail.com>"]
+license = "Apache-2.0"
+repository = "https://github.com/couchbase/jsonsm-rs"
+rust-version = "1.85"
+
+[workspace.dependencies]
+jsonsm-ast = { path = "jsonsm-ast", version = "0.0.1" }
+jsonsm = { path = "jsonsm", version = "0.0.1" }
+thiserror = "2"
+regex = "1"
+serde_json = "1"
+
+[profile.bench]
+debug = true
+
+# Symbols in release builds, so `perf record`/`annotate` on jsonsm-bench attribute to source.
+#
+# Not purely cosmetic: debug info perturbs some inlining decision, and switching this setting
+# has moved a matcher workload by ~1% in instructions retired while leaving others unchanged to
+# six significant figures. Treat it as part of the measurement configuration rather than as a
+# debugging convenience — changing it invalidates comparisons against previously recorded
+# numbers.
+[profile.release]
+debug = true
